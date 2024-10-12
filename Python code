@@ -1,0 +1,169 @@
+from sklearn.experimental import enable_iterative_imputer
+import pandas as pd
+from sklearn.impute import IterativeImputer
+from sklearn.linear_model import BayesianRidge
+from sklearn.preprocessing import LabelEncoder, StandardScaler
+from sklearn.cluster import KMeans
+import matplotlib.pyplot as plt
+import seaborn as sns
+from sklearn.decomposition import PCA
+from sklearn.manifold import MDS, LocallyLinearEmbedding
+import os
+
+os.environ['LOKY_MAX_CPU_COUNT'] = '4'  # Set to the number of cores you want to use
+
+
+# Load the data
+df = pd.read_csv('mental-heath-in-tech-2016_20161114.csv')
+
+# Renaming the columns for readability
+df = df.rename(columns={
+    'What is your gender?': 'gender',
+    'What is your age?': 'age',
+    'What country do you live in?': 'live-in-country',
+    'Do you work remotely?': 'work_remotely',
+    'Which of the following best describes your work position?': 'work_position',
+    'Have you been diagnosed with a mental health condition by a medical professional?': 'diagnosed_with_mhc_by_medical_professional',
+    'Are you self-employed?': 'self_employed',
+    'Is your primary role within your company related to tech/IT?': 'primary_role_tech_or_IT',
+    'Do you know the options for mental health care available under your employer-provided coverage?': 'know_options_for_mhc_under_epc',
+    'Has your employer ever formally discussed mental health (for example, as part of a wellness campaign or other official communication)?': 'employer_discussed_mh',
+    'Does your employer offer resources to learn more about mental health concerns and options for seeking help?': 'employer_offer_resources_to_learn_about_mhc_and_options_for_seeking_help',
+    'How many employees does your company or organization have?': 'how_many_employees'
+})
+
+# Removing redundant features
+columns_to_remove = [
+    "Do you know local or online resources to seek help for a mental health disorder?",
+    "If you have been diagnosed or treated for a mental health disorder, do you ever reveal this to clients or business contacts?",
+    "If you have revealed a mental health issue to a client or business contact, do you believe this has impacted you negatively?",
+    "If you have been diagnosed or treated for a mental health disorder, do you ever reveal this to coworkers or employees?",
+    "Do you have medical coverage (private insurance or state-provided) which includes treatment of  mental health issues?",
+    "If you have revealed a mental health issue to a coworker or employee, do you believe this has impacted you negatively?",
+    "Do you believe your productivity is ever affected by a mental health issue?",
+    "If yes, what percentage of your work time (time performing primary or secondary job functions) is affected by a mental health issue?",
+    "Have your observations of how another individual who discussed a mental health disorder made you less likely to reveal a mental health issue yourself in your current workplace?",
+    "If yes, what condition(s) have you been diagnosed with?",
+    "If maybe, what condition(s) do you believe you have?",
+    "If so, what condition(s) were you diagnosed with?",
+    "What US state or territory do you live in?",
+    "What US state or territory do you work in?",
+]
+
+df = df.drop(columns=columns_to_remove)
+
+# Filter rows where 'self_employed' is not equal to 1
+df = df[df['self_employed'] != 1]
+
+# Filter rows where 'age' is between 18 and 90
+df = df[(df['age'] >= 18) & (df['age'] <= 90)]
+
+# Label Encoding
+encoder = LabelEncoder()
+df_encoded = df.apply(encoder.fit_transform)
+
+# Impute missing values
+imputer = IterativeImputer(BayesianRidge(), random_state=0)
+df_imputed = pd.DataFrame(imputer.fit_transform(df_encoded), columns=df_encoded.columns)
+
+# Clustering
+kmeans = KMeans(n_clusters=3, random_state=0)
+df_imputed['cluster'] = kmeans.fit_predict(df_imputed)
+
+# Data Visualization
+
+# 1. Scatter Plot for Age and Work Position, colored by clusters
+plt.figure(figsize=(10, 6))
+sns.scatterplot(x='age', y='work_position', hue='cluster', palette='viridis', data=df_imputed)
+plt.title('Scatter Plot of Age vs Work Position (Clustered)')
+plt.show()
+
+# Pie chart function with "Other" category grouping
+def plot_pie_chart_with_other(column, cluster_data, threshold=0.05):
+    """
+    Creates a pie chart where categories with values below the threshold are grouped into 'Other'.
+
+    Args:
+    - column: The column to plot.
+    - cluster_data: The DataFrame for the cluster.
+    - threshold: Minimum proportion for a category to be shown separately.
+    """
+    # Get value counts normalized to percentages
+    value_counts = cluster_data[column].value_counts(normalize=True)
+
+    # Group small categories into "Other"
+    small_categories = value_counts[value_counts < threshold]
+    if not small_categories.empty:
+        large_categories = value_counts[value_counts >= threshold]
+        large_categories['Other'] = small_categories.sum()
+    else:
+        large_categories = value_counts
+
+    # Plot pie chart
+    plt.figure(figsize=(6, 6))
+    plt.pie(
+        large_categories,
+        labels=large_categories.index,
+        autopct='%1.1f%%',
+        startangle=140,
+        textprops={'fontsize': 10}  # Adjust the font size
+    )
+    plt.title(f"Cluster {i} - {column.replace('_', ' ').capitalize()} Distribution")
+    plt.show()
+
+
+# Pie chart for gender distribution in each cluster
+for i in range(3):  # Assuming 3 clusters
+    cluster_data = df_imputed[df_imputed['cluster'] == i]
+
+    # Plot for gender distribution
+    plot_pie_chart_with_other('gender', cluster_data)
+
+# You can also repeat this process for other columns like 'work_remotely', etc.
+for i in range(3):  # Assuming 3 clusters
+    cluster_data = df_imputed[df_imputed['cluster'] == i]
+
+    # Plot for remote work distribution
+    plot_pie_chart_with_other('work_remotely', cluster_data)
+
+
+# 3. PCA (Principal Component Analysis)
+pca = PCA(n_components=2)
+pca_result = pca.fit_transform(df_imputed.drop('cluster', axis=1))
+df_imputed['pca-one'] = pca_result[:, 0]
+df_imputed['pca-two'] = pca_result[:, 1]
+
+plt.figure(figsize=(10, 6))
+sns.scatterplot(x='pca-one', y='pca-two', hue='cluster', palette='viridis', data=df_imputed)
+plt.title('PCA - Scatter Plot (Clustered)')
+plt.show()
+
+# 4. MDS (Multi-Dimensional Scaling)
+mds = MDS(n_components=2, random_state=0)
+mds_result = mds.fit_transform(df_imputed.drop('cluster', axis=1))
+
+df_imputed['mds-one'] = mds_result[:, 0]
+df_imputed['mds-two'] = mds_result[:, 1]
+
+plt.figure(figsize=(10, 6))
+sns.scatterplot(x='mds-one', y='mds-two', hue='cluster', palette='viridis', data=df_imputed)
+plt.title('MDS - Scatter Plot (Clustered)')
+plt.show()
+
+# 5. LLE (Local Linear Embedding)
+lle = LocallyLinearEmbedding(n_components=2)
+lle_result = lle.fit_transform(df_imputed.drop('cluster', axis=1))
+
+df_imputed['lle-one'] = lle_result[:, 0]
+df_imputed['lle-two'] = lle_result[:, 1]
+
+plt.figure(figsize=(10, 6))
+sns.scatterplot(x='lle-one', y='lle-two', hue='cluster', palette='viridis', data=df_imputed)
+plt.title('LLE - Scatter Plot (Clustered)')
+plt.show()
+
+# Save the filtered and processed DataFrame
+output_filename = 'health_data_filtered_visualized.csv'
+df_imputed.to_csv(output_filename, index=False)
+print(f"Filtered and visualized DataFrame saved to '{output_filename}'.")
+
